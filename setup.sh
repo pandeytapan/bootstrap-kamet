@@ -110,7 +110,7 @@ fi
 print_header "Step 3/5: Creating Workspace Structure"
 
 log_step "Running setup-workspace.yml..."
-ansible-playbook "$BOOTSTRAP_DIR/setup-workspace.yml"
+ansible-playbook "$BOOTSTRAP_DIR/setup-workspace.yml" --ask-become-pass
 log_info "Workspace created at $BOOKS_DIR"
 
 # ══════════════════════════════════════════
