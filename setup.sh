@@ -3,7 +3,7 @@
 # DevTools Bootstrap - One Command Setup
 # 
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/devtools-bootstrap/main/setup.sh | bash -s -- -y
+#   curl -fsSL https://raw.githubusercontent.com/pandeytapan/bootstrap-kamet/main/setup.sh | bash -s -- -y
 #
 # Or clone and run:
 #   git clone https://github.com/YOUR_USERNAME/devtools-bootstrap.git
