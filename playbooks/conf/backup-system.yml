@@ -1,0 +1,386 @@
+---
+#
+# System Backup Playbook
+# Backs up system configuration, package lists, dotfiles, and NVIDIA state
+#
+# Usage:
+#   ansible-playbook conf.books/backup-system.yml                    # Create backup
+#   ansible-playbook conf.books/backup-system.yml -e restore=true    # Restore from backup
+#   ansible-playbook conf.books/backup-system.yml -e push_git=true   # Backup and push to git
+#
+# Options:
+#   -e restore=true        Restore from latest backup
+#   -e push_git=true       Push backup to git repository
+#   -e backup_name=mybackup  Custom backup name
+#
+
+- name: System Backup
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+
+  vars:
+    restore: false
+    push_git: false
+    backup_name: ""
+    
+    # Backup directory
+    backup_root: "{{ ansible_env.HOME }}/Documents/books/conf.books/backups"
+    
+    # Dotfiles to backup
+    dotfiles:
+      - .bashrc
+      - .bash_aliases
+      - .profile
+      - .gitconfig
+      - .tmux.conf
+      - .vimrc
+      - .config/nvim/init.vim
+      - .config/nvim/init.lua
+      - .ssh/config
+    
+    # Config directories to backup
+    config_dirs:
+      - .config/Code/User/settings.json
+      - .config/Code/User/keybindings.json
+
+  tasks:
+    # ══════════════════════════════════════════
+    # HEADER
+    # ══════════════════════════════════════════
+    - name: Print header
+      ansible.builtin.shell: |
+        echo -e "\n\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e "\e[1m\e[0;36m  System Backup{{ ' - RESTORE MODE' if restore else '' }}\e[0m"
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m\n"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Set backup directory name
+      ansible.builtin.set_fact:
+        backup_dir: "{{ backup_root }}/{{ backup_name if backup_name else ansible_date_time.date + '_' + ansible_date_time.hour + ansible_date_time.minute }}"
+
+    # ══════════════════════════════════════════
+    # BACKUP MODE
+    # ══════════════════════════════════════════
+    - name: Run backup tasks
+      block:
+        # STEP 1: Create backup directory
+        - name: Step 1 - Create backup directory
+          ansible.builtin.shell: |
+            echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 1/6:\e[0m Creating backup directory..."
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        - name: Create backup directory structure
+          ansible.builtin.file:
+            path: "{{ backup_dir }}/{{ item }}"
+            state: directory
+            mode: '0755'
+          loop:
+            - dotfiles
+            - system
+            - packages
+            - nvidia
+
+        - name: Report backup directory
+          ansible.builtin.shell: |
+            echo -e "\e[0;32m[✓]\e[0m Backup directory: {{ backup_dir }}"
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        # STEP 2: System information
+        - name: Step 2 - Backup system information
+          ansible.builtin.shell: |
+            echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 2/6:\e[0m Backing up system information..."
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        - name: Backup system info
+          ansible.builtin.copy:
+            dest: "{{ backup_dir }}/system/system-info.txt"
+            mode: '0644'
+            content: |
+              # System Information Backup
+              # Generated: {{ ansible_date_time.iso8601 }}
+              
+              ## OS
+              Distribution: {{ ansible_distribution }}
+              Version: {{ ansible_distribution_version }}
+              Codename: {{ ansible_distribution_release }}
+              
+              ## Kernel
+              {{ ansible_kernel }}
+              
+              ## Hardware
+              CPU: {{ ansible_processor[2] | default('Unknown') }}
+              Cores: {{ ansible_processor_vcpus }}
+              Memory: {{ (ansible_memtotal_mb / 1024) | round(1) }} GB
+              
+              ## Hostname
+              {{ ansible_hostname }}
+
+        - name: Backup fstab
+          ansible.builtin.shell: |
+            cp /etc/fstab "{{ backup_dir }}/system/fstab"
+          changed_when: false
+
+        - name: Backup hosts file
+          ansible.builtin.shell: |
+            cp /etc/hosts "{{ backup_dir }}/system/hosts"
+          changed_when: false
+
+        - name: Report system backup
+          ansible.builtin.shell: |
+            echo -e "\e[0;32m[✓]\e[0m System info backed up"
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        # STEP 3: Package lists
+        - name: Step 3 - Backup package lists
+          ansible.builtin.shell: |
+            echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 3/6:\e[0m Backing up package lists..."
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        - name: Backup apt packages
+          ansible.builtin.shell: |
+            dpkg --get-selections > "{{ backup_dir }}/packages/apt-packages.txt"
+          changed_when: false
+
+        - name: Backup manually installed packages
+          ansible.builtin.shell: |
+            apt-mark showmanual > "{{ backup_dir }}/packages/apt-manual.txt"
+          changed_when: false
+
+        - name: Backup held packages
+          ansible.builtin.shell: |
+            apt-mark showhold > "{{ backup_dir }}/packages/apt-held.txt"
+          changed_when: false
+
+        - name: Backup pip packages
+          ansible.builtin.shell: |
+            pip3 list --user --format=freeze > "{{ backup_dir }}/packages/pip-packages.txt" 2>/dev/null || true
+          changed_when: false
+
+        - name: Backup PPAs
+          ansible.builtin.shell: |
+            find /etc/apt/sources.list.d/ -name "*.list" -exec cat {} \; > "{{ backup_dir }}/packages/ppas.txt" 2>/dev/null || true
+          changed_when: false
+
+        - name: Report package backup
+          ansible.builtin.shell: |
+            echo -e "\e[0;32m[✓]\e[0m Package lists backed up"
+            echo -e "    - apt packages: $(wc -l < {{ backup_dir }}/packages/apt-packages.txt) packages"
+            echo -e "    - pip packages: $(wc -l < {{ backup_dir }}/packages/pip-packages.txt) packages"
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        # STEP 4: NVIDIA configuration
+        - name: Step 4 - Backup NVIDIA configuration
+          ansible.builtin.shell: |
+            echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 4/6:\e[0m Backing up NVIDIA configuration..."
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        - name: Backup NVIDIA driver info
+          ansible.builtin.shell: |
+            nvidia-smi > "{{ backup_dir }}/nvidia/nvidia-smi.txt" 2>/dev/null || echo "NVIDIA not available" > "{{ backup_dir }}/nvidia/nvidia-smi.txt"
+          changed_when: false
+
+        - name: Backup NVIDIA packages
+          ansible.builtin.shell: |
+            dpkg -l | grep -i nvidia > "{{ backup_dir }}/nvidia/nvidia-packages.txt" 2>/dev/null || true
+          changed_when: false
+
+        - name: Backup DKMS status
+          ansible.builtin.shell: |
+            dkms status > "{{ backup_dir }}/nvidia/dkms-status.txt" 2>/dev/null || true
+          changed_when: false
+
+        - name: Report NVIDIA backup
+          ansible.builtin.shell: |
+            echo -e "\e[0;32m[✓]\e[0m NVIDIA configuration backed up"
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        # STEP 5: Dotfiles
+        - name: Step 5 - Backup dotfiles
+          ansible.builtin.shell: |
+            echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 5/6:\e[0m Backing up dotfiles..."
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        - name: Backup each dotfile
+          ansible.builtin.shell: |
+            src="{{ ansible_env.HOME }}/{{ item }}"
+            dest="{{ backup_dir }}/dotfiles/{{ item | replace('/', '_') }}"
+            if [ -f "$src" ]; then
+              mkdir -p "$(dirname "$dest")"
+              cp "$src" "$dest"
+              echo "backed up"
+            else
+              echo "not found"
+            fi
+          loop: "{{ dotfiles }}"
+          register: dotfile_results
+          changed_when: false
+
+        - name: Report dotfiles backup
+          ansible.builtin.shell: |
+            echo -e "\e[0;32m[✓]\e[0m Dotfiles backed up:"
+            ls -la "{{ backup_dir }}/dotfiles/" | tail -n +2 | while read line; do
+              echo "    $line"
+            done
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        # STEP 6: Create restore script
+        - name: Step 6 - Create restore script
+          ansible.builtin.shell: |
+            echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 6/6:\e[0m Creating restore script..."
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        - name: Create restore script
+          ansible.builtin.copy:
+            dest: "{{ backup_dir }}/restore.sh"
+            mode: '0755'
+            content: |
+              #!/bin/bash
+              # Restore script for backup: {{ backup_dir | basename }}
+              # Generated: {{ ansible_date_time.iso8601 }}
+              
+              BACKUP_DIR="$(dirname "$0")"
+              HOME_DIR="$HOME"
+              
+              echo "Restoring from: $BACKUP_DIR"
+              echo ""
+              
+              # Restore dotfiles
+              echo "Restoring dotfiles..."
+              for file in "$BACKUP_DIR/dotfiles/"*; do
+                filename=$(basename "$file")
+                # Convert back from _ to /
+                dest_name="${filename//_//}"
+                dest="$HOME_DIR/$dest_name"
+                
+                if [ -f "$file" ]; then
+                  mkdir -p "$(dirname "$dest")"
+                  cp "$file" "$dest"
+                  echo "  ✓ Restored $dest_name"
+                fi
+              done
+              
+              echo ""
+              echo "Restore complete!"
+              echo ""
+              echo "Manual steps needed:"
+              echo "  1. Restore apt packages: sudo dpkg --set-selections < packages/apt-packages.txt && sudo apt-get dselect-upgrade"
+              echo "  2. Restore pip packages: pip install --user -r packages/pip-packages.txt"
+              echo "  3. Restore held packages: cat packages/apt-held.txt | xargs sudo apt-mark hold"
+
+        - name: Report restore script
+          ansible.builtin.shell: |
+            echo -e "\e[0;32m[✓]\e[0m Restore script created"
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        # Git push if requested
+        - name: Push to git
+          block:
+            - name: Initialize git if needed
+              ansible.builtin.shell: |
+                cd "{{ backup_root }}"
+                if [ ! -d .git ]; then
+                  git init
+                  echo "*.log" > .gitignore
+                fi
+              changed_when: false
+
+            - name: Commit and push
+              ansible.builtin.shell: |
+                cd "{{ backup_root }}"
+                git add .
+                git commit -m "Backup: {{ ansible_date_time.iso8601 }}" || true
+                git push || echo "No remote configured - skipping push"
+              changed_when: false
+
+            - name: Report git push
+              ansible.builtin.shell: |
+                echo -e "\e[0;32m[✓]\e[0m Backup committed to git"
+              args:
+                executable: /bin/bash
+              changed_when: false
+          when: push_git | bool
+
+      when: not restore | bool
+
+    # ══════════════════════════════════════════
+    # RESTORE MODE
+    # ══════════════════════════════════════════
+    - name: Run restore tasks
+      block:
+        - name: Find latest backup
+          ansible.builtin.shell: |
+            ls -td "{{ backup_root }}"/*/ 2>/dev/null | head -1
+          register: latest_backup
+          changed_when: false
+
+        - name: Check backup exists
+          ansible.builtin.fail:
+            msg: "No backup found in {{ backup_root }}"
+          when: latest_backup.stdout == ""
+
+        - name: Run restore script
+          ansible.builtin.shell: |
+            echo -e "\e[0;34m[→]\e[0m Restoring from {{ latest_backup.stdout }}..."
+            bash "{{ latest_backup.stdout }}/restore.sh"
+          args:
+            executable: /bin/bash
+
+      when: restore | bool
+
+    # ══════════════════════════════════════════
+    # SUMMARY
+    # ══════════════════════════════════════════
+    - name: Print summary
+      ansible.builtin.shell: |
+        echo -e ""
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e "\e[1m\e[0;36m  Backup Summary\e[0m"
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e ""
+        echo -e "\e[1mBackup location:\e[0m"
+        echo -e "  {{ backup_dir }}"
+        echo -e ""
+        echo -e "\e[1mContents:\e[0m"
+        echo -e "  system/       - System info, fstab, hosts"
+        echo -e "  packages/     - apt, pip, PPAs, held packages"
+        echo -e "  nvidia/       - Driver info, DKMS status"
+        echo -e "  dotfiles/     - Shell configs, git, vim, etc."
+        echo -e "  restore.sh    - Restore script"
+        echo -e ""
+        echo -e "\e[1mTo restore:\e[0m"
+        echo -e "  \e[0;36map conf.books/backup-system.yml -e restore=true\e[0m"
+        echo -e ""
+        echo -e "\e[1mOr manually:\e[0m"
+        echo -e "  \e[0;36mbash {{ backup_dir }}/restore.sh\e[0m"
+        echo -e ""
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: not restore | bool
