@@ -35,7 +35,7 @@ log_error() { echo -e "${RED}[✗]${NC} $1"; }
 
 # Configuration
 REPO_URL="https://github.com/pandeytapan/bootstrap-kamet.git"
-BOOTSTRAP_DIR="$HOME/.bootkamet/bootstrap-kamet"
+BOOTSTRAP_DIR="$HOME/.bootkamet"
 BOOKS_DIR="$HOME/Documents/books"
 
 # Parse arguments
