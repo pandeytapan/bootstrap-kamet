@@ -6,8 +6,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/pandeytapan/bootstrap-kamet/main/setup.sh | bash -s -- -y
 #
 # Or clone and run:
-#   git clone https://github.com/YOUR_USERNAME/devtools-bootstrap.git
-#   cd devtools-bootstrap
+#   git clone https://github.com/pandeytapanbootstrap-kamet.git
+#   cd bootstrap-kamet
 #   ./setup.sh
 #
 
@@ -35,7 +35,7 @@ log_error() { echo -e "${RED}[✗]${NC} $1"; }
 
 # Configuration
 REPO_URL="https://github.com/pandeytapan/bootstrap-kamet.git"
-BOOTSTRAP_DIR="$HOME/repos/bootstrap-kamet"
+BOOTSTRAP_DIR="$HOME/.bootkamet/bootstrap-kamet"
 BOOKS_DIR="$HOME/Documents/books"
 
 # Parse arguments
@@ -52,7 +52,7 @@ if [ ! -t 0 ]; then
     AUTO_YES=true
 fi
 
-print_header "DevTools Bootstrap"
+print_header "Bootstrap Kamet"
 
 echo -e "${BOLD}This script will:${NC}"
 echo -e "  1. Install Ansible"
@@ -74,15 +74,15 @@ fi
 # ══════════════════════════════════════════
 # STEP 1: Clone or update repo
 # ══════════════════════════════════════════
-print_header "Step 1/5: Getting Bootstrap Repo"
+print_header "Step 1/5: Getting Kamet Bootstrap Code"
 
 if [ -d "$BOOTSTRAP_DIR" ]; then
-    log_info "Repo exists, updating..."
+    log_info "Bootstrap code exists, updating..."
     cd "$BOOTSTRAP_DIR"
     git pull --quiet
 else
     log_step "Cloning repository..."
-    mkdir -p "$HOME/repos"
+    mkdir -p "$BOOTSTRAP_DIR"
     git clone --quiet "$REPO_URL" "$BOOTSTRAP_DIR"
     cd "$BOOTSTRAP_DIR"
 fi
@@ -160,10 +160,6 @@ echo -e ""
 echo -e "${BOLD}Next steps:${NC}"
 echo -e ""
 echo -e "  1. ${CYAN}source ~/.bashrc${NC}"
-echo -e ""
 echo -e "  2. ${CYAN}ab${NC}  # Jump to books directory"
-echo -e ""
 echo -e "  3. ${CYAN}ap conf.books/health-check.yml${NC}  # Check system"
-echo -e ""
 echo -e "  4. ${CYAN}ap code.books/setup-dev-env.yml -e install=true${NC}  # Install dev tools"
-echo -e ""
