@@ -3,7 +3,7 @@
 # DevTools Bootstrap - One Command Setup
 # 
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/devtools-bootstrap/main/setup.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/devtools-bootstrap/main/setup.sh | bash -s -- -y
 #
 # Or clone and run:
 #   git clone https://github.com/YOUR_USERNAME/devtools-bootstrap.git
@@ -34,9 +34,23 @@ log_step()  { echo -e "${BLUE}[→]${NC} $1"; }
 log_error() { echo -e "${RED}[✗]${NC} $1"; }
 
 # Configuration
-REPO_URL="https://github.com/pandey.tapan/devtools-bootstrap.git"
-BOOTSTRAP_DIR="$HOME/repos/devtools-bootstrap"
+REPO_URL="https://github.com/pandeytapan/bootstrap-kamet.git"
+BOOTSTRAP_DIR="$HOME/repos/bootstrap-kamet"
 BOOKS_DIR="$HOME/Documents/books"
+
+# Parse arguments
+AUTO_YES=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -y|--yes) AUTO_YES=true; shift ;;
+        *) shift ;;
+    esac
+done
+
+# Detect if running from pipe
+if [ ! -t 0 ]; then
+    AUTO_YES=true
+fi
 
 print_header "DevTools Bootstrap"
 
@@ -46,10 +60,15 @@ echo -e "  2. Create workspace structure"
 echo -e "  3. Copy playbooks to ~/Documents/books/"
 echo -e "  4. Configure shell environment"
 echo -e ""
-read -p "Continue? [Y/n]: " choice
-if [[ "$choice" =~ ^[Nn]$ ]]; then
-    echo "Aborted."
-    exit 0
+
+if [ "$AUTO_YES" = false ]; then
+    read -p "Continue? [Y/n]: " choice
+    if [[ "$choice" =~ ^[Nn]$ ]]; then
+        echo "Aborted."
+        exit 0
+    fi
+else
+    echo -e "${YELLOW}[!] Running in non-interactive mode${NC}\n"
 fi
 
 # ══════════════════════════════════════════
