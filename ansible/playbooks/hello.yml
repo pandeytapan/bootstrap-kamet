@@ -1,0 +1,46 @@
+---
+# Test playbook to verify Ansible installation
+# Run: ansible-playbook playbooks/hello.yml
+
+- name: Verify Ansible Setup
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+
+  tasks:
+    - name: Display greeting
+      ansible.builtin.debug:
+        msg: "Hello from DevTools Ansible!"
+
+    - name: Show system information
+      ansible.builtin.debug:
+        msg:
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Kernel: {{ ansible_kernel }}"
+          - "Python: {{ ansible_python_version }}"
+          - "User: {{ ansible_user_id }}"
+
+    - name: Verify devtools structure
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /opt/devtools/bin/ansible
+        - /opt/devtools/etc/ansible/ansible.cfg
+        - /opt/devtools/ansible/venv
+      register: devtools_check
+
+    - name: Report devtools status
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ 'EXISTS' if item.stat.exists else 'MISSING' }}"
+      loop: "{{ devtools_check.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Show Ansible version
+      ansible.builtin.command: ansible --version
+      register: ansible_ver
+      changed_when: false
+
+    - name: Display Ansible version
+      ansible.builtin.debug:
+        msg: "{{ ansible_ver.stdout_lines[0] }}"

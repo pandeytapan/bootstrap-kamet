@@ -1,0 +1,267 @@
+---
+#
+# System Health Check Playbook
+# Monitors system status, disk space, NVIDIA, and overall health
+#
+# Usage: ansible-playbook conf.books/health-check.yml
+#
+
+- name: System Health Check
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+
+  vars:
+    # Thresholds for warnings
+    disk_warning_percent: 80
+    memory_warning_percent: 80
+
+  tasks:
+    # ══════════════════════════════════════════
+    # HEADER
+    # ══════════════════════════════════════════
+    - name: Print header
+      ansible.builtin.shell: |
+        echo -e "\n\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e "\e[1m\e[0;36m  System Health Check\e[0m"
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e "\e[0;33m  $(date '+%Y-%m-%d %H:%M:%S')\e[0m\n"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # SYSTEM INFO
+    # ══════════════════════════════════════════
+    - name: System Information
+      ansible.builtin.shell: |
+        echo -e "\e[1m┌─ System Information ─────────────────────┐\e[0m"
+        echo -e "\e[0;32m  OS:\e[0m         {{ ansible_distribution }} {{ ansible_distribution_version }}"
+        echo -e "\e[0;32m  Kernel:\e[0m     {{ ansible_kernel }}"
+        echo -e "\e[0;32m  Hostname:\e[0m   {{ ansible_hostname }}"
+        echo -e "\e[0;32m  Uptime:\e[0m     $(uptime -p)"
+        echo -e "\e[1m└──────────────────────────────────────────┘\e[0m\n"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # CPU & MEMORY
+    # ══════════════════════════════════════════
+    - name: Get memory usage
+      ansible.builtin.shell: |
+        free | awk '/Mem:/ {printf "%.0f", $3/$2 * 100}'
+      register: memory_percent
+      changed_when: false
+
+    - name: Get load average
+      ansible.builtin.shell: |
+        cat /proc/loadavg | awk '{print $1, $2, $3}'
+      register: load_avg
+      changed_when: false
+
+    - name: CPU & Memory Status
+      ansible.builtin.shell: |
+        echo -e "\e[1m┌─ CPU & Memory ───────────────────────────┐\e[0m"
+        echo -e "\e[0;32m  CPU Cores:\e[0m    {{ ansible_processor_vcpus }}"
+        echo -e "\e[0;32m  Load Avg:\e[0m     {{ load_avg.stdout }}"
+        
+        MEM_PERCENT={{ memory_percent.stdout }}
+        if [ $MEM_PERCENT -gt {{ memory_warning_percent }} ]; then
+          echo -e "\e[0;31m  Memory:\e[0m       ${MEM_PERCENT}% used ⚠️  HIGH"
+        else
+          echo -e "\e[0;32m  Memory:\e[0m       ${MEM_PERCENT}% used ✓"
+        fi
+        
+        echo -e "\e[0;32m  Total RAM:\e[0m    {{ (ansible_memtotal_mb / 1024) | round(1) }} GB"
+        echo -e "\e[1m└──────────────────────────────────────────┘\e[0m\n"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # DISK SPACE
+    # ══════════════════════════════════════════
+    - name: Get disk usage
+      ansible.builtin.shell: |
+        df -h / | awk 'NR==2 {print $5}' | tr -d '%'
+      register: disk_percent
+      changed_when: false
+
+    - name: Get disk details
+      ansible.builtin.shell: |
+        df -h / | awk 'NR==2 {print $2, $3, $4}'
+      register: disk_details
+      changed_when: false
+
+    - name: Disk Space Status
+      ansible.builtin.shell: |
+        echo -e "\e[1m┌─ Disk Space ─────────────────────────────┐\e[0m"
+        
+        DISK_PERCENT={{ disk_percent.stdout }}
+        DETAILS=({{ disk_details.stdout }})
+        
+        if [ $DISK_PERCENT -gt {{ disk_warning_percent }} ]; then
+          echo -e "\e[0;31m  Root (/):\e[0m     ${DISK_PERCENT}% used ⚠️  HIGH"
+        else
+          echo -e "\e[0;32m  Root (/):\e[0m     ${DISK_PERCENT}% used ✓"
+        fi
+        
+        echo -e "\e[0;32m  Total:\e[0m        ${DETAILS[0]}"
+        echo -e "\e[0;32m  Used:\e[0m         ${DETAILS[1]}"
+        echo -e "\e[0;32m  Available:\e[0m    ${DETAILS[2]}"
+        echo -e "\e[1m└──────────────────────────────────────────┘\e[0m\n"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # NVIDIA STATUS
+    # ══════════════════════════════════════════
+    - name: Check NVIDIA driver
+      ansible.builtin.shell: |
+        nvidia-smi --query-gpu=driver_version,gpu_name,memory.total,memory.used,temperature.gpu,utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo "NOT_AVAILABLE"
+      register: nvidia_info
+      changed_when: false
+
+    - name: NVIDIA Status
+      ansible.builtin.shell: |
+        echo -e "\e[1m┌─ NVIDIA GPU ─────────────────────────────┐\e[0m"
+        
+        if [ "{{ nvidia_info.stdout }}" = "NOT_AVAILABLE" ]; then
+          echo -e "\e[0;31m  Status:\e[0m       NOT WORKING ⚠️"
+          echo -e "\e[0;31m  Action:\e[0m       Check NVIDIA drivers!"
+        else
+          IFS=',' read -r DRIVER GPU MEM_TOTAL MEM_USED TEMP UTIL <<< "{{ nvidia_info.stdout }}"
+          echo -e "\e[0;32m  Status:\e[0m       Working ✓"
+          echo -e "\e[0;32m  GPU:\e[0m          $GPU"
+          echo -e "\e[0;32m  Driver:\e[0m       $DRIVER"
+          echo -e "\e[0;32m  Memory:\e[0m       ${MEM_USED}MB / ${MEM_TOTAL}MB"
+          echo -e "\e[0;32m  Temperature:\e[0m  ${TEMP}°C"
+          echo -e "\e[0;32m  Utilization:\e[0m  ${UTIL}%"
+        fi
+        
+        echo -e "\e[1m└──────────────────────────────────────────┘\e[0m\n"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # HELD PACKAGES
+    # ══════════════════════════════════════════
+    - name: Get held packages
+      ansible.builtin.shell: |
+        apt-mark showhold 2>/dev/null || echo "NONE"
+      register: held_packages
+      changed_when: false
+
+    - name: Held Packages Status
+      ansible.builtin.shell: |
+        echo -e "\e[1m┌─ Protected Packages ─────────────────────┐\e[0m"
+        
+        HELD="{{ held_packages.stdout }}"
+        if [ "$HELD" = "NONE" ] || [ -z "$HELD" ]; then
+          echo -e "\e[0;33m  No packages held ⚠️\e[0m"
+          echo -e "\e[0;33m  Run safe-upgrade.yml to protect NVIDIA/kernel\e[0m"
+        else
+          echo -e "\e[0;32m  Protected packages:\e[0m"
+          echo "{{ held_packages.stdout }}" | while read pkg; do
+            echo -e "    ✓ $pkg"
+          done
+        fi
+        
+        echo -e "\e[1m└──────────────────────────────────────────┘\e[0m\n"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # PENDING UPDATES
+    # ══════════════════════════════════════════
+    - name: Check pending updates
+      ansible.builtin.shell: |
+        apt list --upgradable 2>/dev/null | grep -v "Listing" | wc -l
+      register: pending_updates
+      changed_when: false
+
+    - name: Pending Updates Status
+      ansible.builtin.shell: |
+        echo -e "\e[1m┌─ Pending Updates ────────────────────────┐\e[0m"
+        
+        UPDATES={{ pending_updates.stdout }}
+        if [ $UPDATES -eq 0 ]; then
+          echo -e "\e[0;32m  System up to date ✓\e[0m"
+        else
+          echo -e "\e[0;33m  $UPDATES packages can be upgraded\e[0m"
+          echo -e "\e[0;33m  Run: ap conf.books/safe-upgrade.yml -e upgrade=true\e[0m"
+        fi
+        
+        echo -e "\e[1m└──────────────────────────────────────────┘\e[0m\n"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # SERVICES STATUS
+    # ══════════════════════════════════════════
+    - name: Check critical services
+      ansible.builtin.shell: |
+        echo -e "\e[1m┌─ Critical Services ──────────────────────┐\e[0m"
+        
+        for service in ssh NetworkManager systemd-resolved; do
+          if systemctl is-active --quiet $service 2>/dev/null; then
+            echo -e "\e[0;32m  $service:\e[0m Running ✓"
+          else
+            echo -e "\e[0;31m  $service:\e[0m Stopped ⚠️"
+          fi
+        done
+        
+        echo -e "\e[1m└──────────────────────────────────────────┘\e[0m\n"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # SUMMARY
+    # ══════════════════════════════════════════
+    - name: Print summary
+      ansible.builtin.shell: |
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e "\e[1m\e[0;36m  Health Summary\e[0m"
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m\n"
+        
+        ISSUES=0
+        
+        # Check memory
+        if [ {{ memory_percent.stdout }} -gt {{ memory_warning_percent }} ]; then
+          echo -e "\e[0;31m  ⚠️  Memory usage high ({{ memory_percent.stdout }}%)\e[0m"
+          ISSUES=$((ISSUES+1))
+        fi
+        
+        # Check disk
+        if [ {{ disk_percent.stdout }} -gt {{ disk_warning_percent }} ]; then
+          echo -e "\e[0;31m  ⚠️  Disk usage high ({{ disk_percent.stdout }}%)\e[0m"
+          ISSUES=$((ISSUES+1))
+        fi
+        
+        # Check NVIDIA
+        if [ "{{ nvidia_info.stdout }}" = "NOT_AVAILABLE" ]; then
+          echo -e "\e[0;31m  ⚠️  NVIDIA driver not responding\e[0m"
+          ISSUES=$((ISSUES+1))
+        fi
+        
+        # Check held packages
+        HELD="{{ held_packages.stdout }}"
+        if [ "$HELD" = "NONE" ] || [ -z "$HELD" ]; then
+          echo -e "\e[0;33m  ⚠️  No packages protected (run safe-upgrade.yml)\e[0m"
+          ISSUES=$((ISSUES+1))
+        fi
+        
+        if [ $ISSUES -eq 0 ]; then
+          echo -e "\e[0;32m  ✓ All systems healthy!\e[0m"
+        fi
+        
+        echo -e ""
+      args:
+        executable: /bin/bash
+      changed_when: false

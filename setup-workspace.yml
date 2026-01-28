@@ -1,0 +1,332 @@
+---
+#
+# Workspace Setup Playbook
+# Creates /opt/devtools and ~/Documents/books structure
+#
+# Usage: ansible-playbook setup-workspace.yml
+#
+
+- name: Setup DevTools Workspace
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+
+  vars:
+    # Directory paths
+    devtools_root: "/opt/devtools"
+    books_root: "{{ ansible_env.HOME }}/Documents/books"
+
+    # Books to create
+    book_types:
+      - office
+      - code
+      - client
+      - personal
+      - tmp
+
+  tasks:
+    # ══════════════════════════════════════════
+    # HEADER
+    # ══════════════════════════════════════════
+    - name: Print header
+      ansible.builtin.shell: |
+        echo -e "\n\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e "\e[1m\e[0;36m  DevTools Workspace Setup\e[0m"
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m\n"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # DEVTOOLS STRUCTURE (/opt/devtools)
+    # ══════════════════════════════════════════
+    - name: Step 1 - Print message
+      ansible.builtin.shell: |
+        echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 1/5:\e[0m Creating /opt/devtools structure..."
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Create devtools directories
+      become: yes
+      ansible.builtin.file:
+        path: "{{ devtools_root }}/{{ item }}"
+        state: directory
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        mode: '0755'
+      loop:
+        - bin
+        - src
+        - share
+        - etc
+      register: devtools_result
+
+    - name: Report devtools creation
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Created {{ devtools_root }}/{{ item.item }}"
+      args:
+        executable: /bin/bash
+      loop: "{{ devtools_result.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # ANSIBLE BOOKS STRUCTURE
+    # ══════════════════════════════════════════
+    - name: Step 2 - Print message
+      ansible.builtin.shell: |
+        echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 2/5:\e[0m Creating ~/Documents/books structure..."
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Create books root directory
+      ansible.builtin.file:
+        path: "{{ books_root }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create book directories
+      ansible.builtin.file:
+        path: "{{ books_root }}/{{ item }}.books"
+        state: directory
+        mode: '0755'
+      loop: "{{ book_types }}"
+      register: books_result
+
+    - name: Report books creation
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Created {{ item.item }}.books/"
+      args:
+        executable: /bin/bash
+      loop: "{{ books_result.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      changed_when: false
+
+    - name: Create inventory directory
+      ansible.builtin.file:
+        path: "{{ books_root }}/inventory"
+        state: directory
+        mode: '0755'
+
+    - name: Report inventory creation
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Created inventory/"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # CONFIGURATION FILES
+    # ══════════════════════════════════════════
+    - name: Step 3 - Print message
+      ansible.builtin.shell: |
+        echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 3/5:\e[0m Creating configuration files..."
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Create ansible.cfg
+      ansible.builtin.copy:
+        dest: "{{ books_root }}/ansible.cfg"
+        mode: '0644'
+        content: |
+          [defaults]
+          inventory = ./inventory/hosts.ini
+          host_key_checking = False
+          retry_files_enabled = False
+          stdout_callback = yaml
+
+          [privilege_escalation]
+          become = False
+          become_method = sudo
+
+    - name: Report ansible.cfg creation
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Created ansible.cfg"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Create hosts inventory
+      ansible.builtin.copy:
+        dest: "{{ books_root }}/inventory/hosts.ini"
+        mode: '0644'
+        content: |
+          [local]
+          localhost ansible_connection=local
+
+          [remote]
+          # Add remote hosts here
+          # server1 ansible_host=192.168.1.10 ansible_user={{ ansible_user_id }}
+
+    - name: Report inventory creation
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Created inventory/hosts.ini"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # SAMPLE PLAYBOOKS
+    # ══════════════════════════════════════════
+    - name: Step 4 - Print message
+      ansible.builtin.shell: |
+        echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 4/5:\e[0m Creating sample playbooks..."
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Create sample playbook in each book
+      ansible.builtin.copy:
+        dest: "{{ books_root }}/{{ item }}.books/example.yml"
+        mode: '0644'
+        content: |
+          ---
+          # {{ item | capitalize }} Playbook - Example
+          # Run: cd ~/Documents/books && ansible-playbook {{ item }}.books/example.yml
+
+          - name: Example {{ item | capitalize }} Playbook
+            hosts: local
+            gather_facts: no
+
+            tasks:
+              - name: Hello from {{ item }}.books
+                ansible.builtin.debug:
+                  msg: "This is a {{ item }} playbook. Edit me!"
+      loop: "{{ book_types }}"
+
+    - name: Report sample playbooks creation
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Created sample playbooks in all books"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # SHELL ENVIRONMENT
+    # ══════════════════════════════════════════
+    - name: Step 5 - Print message
+      ansible.builtin.shell: |
+        echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 5/5:\e[0m Creating shell environment..."
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Create .env file
+      ansible.builtin.copy:
+        dest: "{{ books_root }}/.env"
+        mode: '0644'
+        content: |
+          # DevTools Environment
+          # Sourced from ~/.bashrc
+
+          # DevTools binaries in PATH
+          export PATH="/opt/devtools/bin:$PATH"
+
+          # Default Ansible config
+          export ANSIBLE_CONFIG="$HOME/Documents/books/ansible.cfg"
+
+          # Aliases
+          alias ab='cd ~/Documents/books'
+          alias ap='ansible-playbook'
+          alias al='ansible-lint'
+          alias av='ansible-vault'
+
+    - name: Report .env creation
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Created .env"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Check if .bashrc already sources .env
+      ansible.builtin.lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        regexp: 'source.*Documents/books/.env'
+        state: absent
+      check_mode: yes
+      register: bashrc_check
+      changed_when: false
+
+    - name: Add source line to .bashrc
+      ansible.builtin.lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: |
+
+          # DevTools Environment
+          source ~/Documents/books/.env
+        insertafter: EOF
+      when: bashrc_check.found == 0
+
+    - name: Report .bashrc update
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Updated ~/.bashrc (source added)"
+      args:
+        executable: /bin/bash
+      when: bashrc_check.found == 0
+      changed_when: false
+
+    - name: Report .bashrc already configured
+      ansible.builtin.shell: |
+        echo -e "\e[1;33m[!]\e[0m ~/.bashrc already configured (skipped)"
+      args:
+        executable: /bin/bash
+      when: bashrc_check.found > 0
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # SUMMARY
+    # ══════════════════════════════════════════
+    - name: Print summary
+      ansible.builtin.shell: |
+        echo -e ""
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e "\e[1m\e[0;36m  Setup Complete!\e[0m"
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e ""
+        echo -e "\e[1mDirectories created:\e[0m"
+        echo -e ""
+        echo -e "\e[1;33m/opt/devtools/\e[0m"
+        echo -e "├── bin/      # Compiled binaries"
+        echo -e "├── src/      # Source code"
+        echo -e "├── share/    # Shared data"
+        echo -e "└── etc/      # Configurations"
+        echo -e ""
+        echo -e "\e[1;33m~/Documents/books/\e[0m"
+        echo -e "├── ansible.cfg"
+        echo -e "├── inventory/"
+        echo -e "│   └── hosts.ini"
+        echo -e "├── office.books/"
+        echo -e "├── code.books/"
+        echo -e "├── client.books/"
+        echo -e "├── personal.books/"
+        echo -e "└── tmp.books/"
+        echo -e ""
+        echo -e "\e[1mWhat's configured:\e[0m"
+        echo -e ""
+        echo -e "\e[0;32m✓\e[0m PATH includes /opt/devtools/bin"
+        echo -e "\e[0;32m✓\e[0m ANSIBLE_CONFIG points to ~/Documents/books/ansible.cfg"
+        echo -e "\e[0;32m✓\e[0m ~/.bashrc updated automatically"
+        echo -e ""
+        echo -e "\e[1mAliases available (after reload):\e[0m"
+        echo -e ""
+        echo -e "\e[0;36mab\e[0m  → cd ~/Documents/books"
+        echo -e "\e[0;36map\e[0m  → ansible-playbook"
+        echo -e "\e[0;36mal\e[0m  → ansible-lint"
+        echo -e "\e[0;36mav\e[0m  → ansible-vault"
+        echo -e ""
+        echo -e "\e[1mNext step:\e[0m"
+        echo -e ""
+        echo -e "  Reload your shell, then test:"
+        echo -e ""
+        echo -e "    \e[0;36msource ~/.bashrc\e[0m"
+        echo -e "    \e[0;36mab\e[0m"
+        echo -e "    \e[0;36map tmp.books/example.yml\e[0m"
+        echo -e ""
+      args:
+        executable: /bin/bash
+      changed_when: false

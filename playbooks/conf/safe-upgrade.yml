@@ -1,0 +1,338 @@
+---
+#
+# Safe System Upgrade Playbook for Pop!_OS
+# Preserves NVIDIA driver configuration
+#
+# Usage: ansible-playbook conf.books/safe-upgrade.yml
+#
+# Options:
+#   --check          Dry run (show what would change)
+#   -e upgrade=true  Actually perform the upgrade
+#
+
+- name: Safe System Upgrade (NVIDIA Protected)
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+
+  vars:
+    # Set to true to actually upgrade (default is check-only)
+    upgrade: false
+    
+    # Backup directory
+    backup_dir: "{{ ansible_env.HOME }}/Documents/books/conf.books/backups"
+    
+    # Date for backup files
+    backup_date: "{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}"
+
+  tasks:
+    # ══════════════════════════════════════════
+    # HEADER
+    # ══════════════════════════════════════════
+    - name: Print header
+      ansible.builtin.shell: |
+        echo -e "\n\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e "\e[1m\e[0;36m  Safe System Upgrade (NVIDIA Protected)\e[0m"
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m\n"
+        if [ "{{ upgrade }}" = "false" ]; then
+          echo -e "\e[1;33m[!] CHECK MODE - No changes will be made\e[0m"
+          echo -e "\e[1;33m    Run with: -e upgrade=true to apply\e[0m\n"
+        else
+          echo -e "\e[1;31m[!] UPGRADE MODE - Changes will be applied\e[0m\n"
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # STEP 1: GATHER CURRENT STATE
+    # ══════════════════════════════════════════
+    - name: Step 1 - Gather current state
+      ansible.builtin.shell: |
+        echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 1/6:\e[0m Gathering current system state..."
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Get current kernel version
+      ansible.builtin.command: uname -r
+      register: current_kernel
+      changed_when: false
+
+    - name: Get NVIDIA driver version
+      ansible.builtin.shell: nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null || echo "NOT_FOUND"
+      register: nvidia_version
+      changed_when: false
+
+    - name: Get NVIDIA DKMS status
+      ansible.builtin.shell: dkms status | grep nvidia || echo "NO_NVIDIA_DKMS"
+      register: nvidia_dkms
+      changed_when: false
+
+    - name: Get installed NVIDIA packages
+      ansible.builtin.shell: dpkg -l | grep -E "^ii.*nvidia" | awk '{print $2"="$3}' || echo "NONE"
+      register: nvidia_packages
+      changed_when: false
+
+    - name: Report current state
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Current kernel: {{ current_kernel.stdout }}"
+        echo -e "\e[0;32m[✓]\e[0m NVIDIA driver: {{ nvidia_version.stdout }}"
+        echo -e "\e[0;32m[✓]\e[0m NVIDIA DKMS: {{ nvidia_dkms.stdout | regex_replace('\n', ', ') }}"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # STEP 2: CREATE BACKUP
+    # ══════════════════════════════════════════
+    - name: Step 2 - Create backup
+      ansible.builtin.shell: |
+        echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 2/6:\e[0m Creating configuration backup..."
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Create backup directory
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Backup current system state
+      ansible.builtin.copy:
+        dest: "{{ backup_dir }}/system-state-{{ backup_date }}.txt"
+        mode: '0644'
+        content: |
+          # System State Backup - {{ ansible_date_time.iso8601 }}
+          
+          ## OS Information
+          {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Codename: {{ ansible_distribution_release }}
+          
+          ## Kernel
+          {{ current_kernel.stdout }}
+          
+          ## NVIDIA Driver
+          {{ nvidia_version.stdout }}
+          
+          ## NVIDIA DKMS Status
+          {{ nvidia_dkms.stdout }}
+          
+          ## Installed NVIDIA Packages
+          {{ nvidia_packages.stdout }}
+
+    - name: Backup package list
+      ansible.builtin.shell: |
+        dpkg --get-selections > "{{ backup_dir }}/packages-{{ backup_date }}.txt"
+      changed_when: false
+
+    - name: Report backup created
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Backup saved to: {{ backup_dir }}"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # STEP 3: HOLD NVIDIA + KERNEL PACKAGES
+    # ══════════════════════════════════════════
+    - name: Step 3 - Protect NVIDIA and Kernel packages
+      ansible.builtin.shell: |
+        echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 3/6:\e[0m Protecting NVIDIA and Kernel packages from upgrade..."
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Get NVIDIA package names to hold
+      ansible.builtin.shell: |
+        dpkg -l | grep -E "^ii.*nvidia" | awk '{print $2}'
+      register: nvidia_hold_packages
+      changed_when: false
+
+    - name: Get current kernel packages to hold
+      ansible.builtin.shell: |
+        dpkg -l | grep -E "^ii.*(linux-image-{{ current_kernel.stdout }}|linux-headers-{{ current_kernel.stdout }})" | awk '{print $2}'
+      register: kernel_hold_packages
+      changed_when: false
+
+    - name: Hold ALL NVIDIA packages (including i386)
+      ansible.builtin.shell: |
+        sudo apt-mark hold "{{ item }}" 2>/dev/null || true
+      loop: "{{ nvidia_hold_packages.stdout_lines }}"
+      when: 
+        - upgrade | bool
+        - nvidia_hold_packages.stdout_lines | length > 0
+
+    - name: Hold kernel packages
+      ansible.builtin.shell: |
+        sudo apt-mark hold "{{ item }}" 2>/dev/null || true
+      loop: "{{ kernel_hold_packages.stdout_lines }}"
+      when: 
+        - upgrade | bool
+        - kernel_hold_packages.stdout_lines | length > 0
+
+    - name: Report held packages
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Held packages:"
+        echo -e "\e[1;33m    NVIDIA:\e[0m"
+        apt-mark showhold | grep -i nvidia | while read pkg; do
+          echo -e "      - $pkg"
+        done
+        echo -e "\e[1;33m    Kernel:\e[0m"
+        apt-mark showhold | grep -i linux | while read pkg; do
+          echo -e "      - $pkg"
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # STEP 4: CHECK FOR UPDATES
+    # ══════════════════════════════════════════
+    - name: Step 4 - Check for updates
+      ansible.builtin.shell: |
+        echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 4/6:\e[0m Checking for available updates..."
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Update package lists
+      become: yes
+      ansible.builtin.apt:
+        update_cache: yes
+      when: upgrade | bool
+
+    - name: Check upgradable packages (dry run)
+      ansible.builtin.shell: |
+        apt list --upgradable 2>/dev/null | grep -v "Listing" | head -20
+      register: upgradable
+      changed_when: false
+
+    - name: Count upgradable packages
+      ansible.builtin.shell: |
+        apt list --upgradable 2>/dev/null | grep -v "Listing" | wc -l
+      register: upgrade_count
+      changed_when: false
+
+    - name: Report available updates
+      ansible.builtin.shell: |
+        echo -e "\e[0;32m[✓]\e[0m Found {{ upgrade_count.stdout }} packages to upgrade"
+        if [ {{ upgrade_count.stdout }} -gt 0 ]; then
+          echo -e "\e[0;33m    Sample (first 20):\e[0m"
+          echo "{{ upgradable.stdout }}" | head -10 | while read line; do
+            echo -e "    - $line"
+          done
+          if [ {{ upgrade_count.stdout }} -gt 10 ]; then
+            echo -e "    ... and more"
+          fi
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # STEP 5: PERFORM UPGRADE
+    # ══════════════════════════════════════════
+    - name: Step 5 - Perform upgrade
+      ansible.builtin.shell: |
+        if [ "{{ upgrade }}" = "true" ]; then
+          echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 5/6:\e[0m Performing system upgrade..."
+        else
+          echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 5/6:\e[0m Skipping upgrade (check mode)..."
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Upgrade packages (safe upgrade - not full-upgrade)
+      become: yes
+      ansible.builtin.apt:
+        upgrade: safe
+        autoremove: no
+      when: upgrade | bool
+      register: upgrade_result
+
+    - name: Report upgrade status
+      ansible.builtin.shell: |
+        if [ "{{ upgrade }}" = "true" ]; then
+          echo -e "\e[0;32m[✓]\e[0m System upgrade completed"
+        else
+          echo -e "\e[1;33m[!]\e[0m Upgrade skipped (run with -e upgrade=true)"
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # STEP 6: VERIFY NVIDIA
+    # ══════════════════════════════════════════
+    - name: Step 6 - Verify NVIDIA status
+      ansible.builtin.shell: |
+        echo -e "\e[0;34m[→]\e[0m \e[1mSTEP 6/6:\e[0m Verifying NVIDIA driver status..."
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Check NVIDIA driver post-upgrade
+      ansible.builtin.shell: nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null || echo "NOT_WORKING"
+      register: nvidia_post
+      changed_when: false
+
+    - name: Check DKMS status post-upgrade
+      ansible.builtin.shell: dkms status | grep nvidia || echo "NO_NVIDIA_DKMS"
+      register: dkms_post
+      changed_when: false
+
+    - name: Report NVIDIA status
+      ansible.builtin.shell: |
+        if [ "{{ nvidia_post.stdout }}" = "NOT_WORKING" ]; then
+          echo -e "\e[0;31m[✗]\e[0m NVIDIA driver not responding!"
+          echo -e "\e[0;31m    Action: Reboot and select previous kernel from boot menu\e[0m"
+        else
+          echo -e "\e[0;32m[✓]\e[0m NVIDIA driver: {{ nvidia_post.stdout }}"
+          echo -e "\e[0;32m[✓]\e[0m DKMS: {{ dkms_post.stdout | regex_replace('\n', ', ') }}"
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # ══════════════════════════════════════════
+    # SUMMARY
+    # ══════════════════════════════════════════
+    - name: Print summary
+      ansible.builtin.shell: |
+        echo -e ""
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e "\e[1m\e[0;36m  Summary\e[0m"
+        echo -e "\e[1m\e[0;36m══════════════════════════════════════════\e[0m"
+        echo -e ""
+        echo -e "\e[1mSystem:\e[0m"
+        echo -e "  OS:     {{ ansible_distribution }} {{ ansible_distribution_version }}"
+        echo -e "  Kernel: {{ current_kernel.stdout }} \e[0;32m(protected)\e[0m"
+        echo -e ""
+        echo -e "\e[1mNVIDIA:\e[0m"
+        echo -e "  Driver: {{ nvidia_post.stdout }} \e[0;32m(protected)\e[0m"
+        echo -e "  Status: {{ 'OK' if nvidia_post.stdout != 'NOT_WORKING' else 'NEEDS ATTENTION' }}"
+        echo -e ""
+        echo -e "\e[1mProtected packages:\e[0m"
+        apt-mark showhold 2>/dev/null | while read pkg; do
+          echo -e "  - $pkg"
+        done
+        echo -e ""
+        echo -e "\e[1mBackup:\e[0m"
+        echo -e "  {{ backup_dir }}"
+        echo -e ""
+        if [ "{{ upgrade }}" = "false" ]; then
+          echo -e "\e[1;33mTo apply upgrades, run:\e[0m"
+          echo -e "  \e[0;36map conf.books/safe-upgrade.yml -e upgrade=true\e[0m"
+          echo -e ""
+        else
+          echo -e "\e[1;32mUpgrade complete!\e[0m"
+          echo -e ""
+          echo -e "\e[1mNote:\e[0m Kernel and NVIDIA were NOT upgraded (held)"
+          echo -e ""
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
