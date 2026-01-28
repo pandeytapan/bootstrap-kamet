@@ -6,8 +6,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/pandeytapan/bootstrap-kamet/main/setup.sh | bash -s -- -y
 #
 # Or clone and run:
-#   git clone https://github.com/pandeytapanbootstrap-kamet.git
-#   cd bootstrap-kamet
+#   git clone https://github.com/pandeytapanbootstrap-kamet.git ~/.bootkamet
+#   cd bootkamet
 #   ./setup.sh
 #
 
